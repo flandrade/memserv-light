@@ -5,16 +5,16 @@
   "main": "dist/server/index.js",
   "bin": {
     "memserv-cli": "./dist/cli.js",
-    "memserv-server": "./dist/server/index.js"
+    "memserv-server": "./dist/server.js"
   },
   "scripts": {
     "build": "tsc",
     "start": "node dist/server/index.js",
     "cli": "node dist/cli.js",
-    "dev": "ts-node src/server/index.ts",
+    "dev": "ts-node src/index.ts",
     "dev:cli": "ts-node src/cli.ts",
     "test": "npm run test:serializer",
-    "test:serializer": "tsx --test src/server/serializer.test.ts"
+    "test:serializer": "tsx --test src/serializer/serializer.test.ts"
   },
   "dependencies": {
     "commander": "^11.1.0",
