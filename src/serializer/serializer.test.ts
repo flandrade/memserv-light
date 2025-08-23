@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { serialize, deserialize, formatResponse } from './serializer';
+import { serialize, deserialize, formatResponse, type RespValue } from './serializer';
 
 describe('RESP Serializer', () => {
   describe('serialize', () => {
@@ -75,12 +75,12 @@ describe('RESP Serializer', () => {
     });
 
     test('should serialize undefined as string', () => {
-      const result = serialize(undefined);
+      const result = serialize(undefined as any); // Allow undefined for this legacy test
       assert.strictEqual(result, '$9\r\nundefined\r\n');
     });
 
     test('should serialize objects as string', () => {
-      const result = serialize({ key: 'value' });
+      const result = serialize({ key: 'value' } as any); // Allow objects for this legacy test
       assert.strictEqual(result, '$15\r\n[object Object]\r\n');
     });
   });
@@ -142,8 +142,9 @@ describe('RESP Serializer', () => {
     });
 
     test('should handle empty input', () => {
-      const result = deserialize('');
-      assert.strictEqual(result, '');
+      assert.throws(() => {
+        deserialize('');
+      }, /Empty input data/);
     });
 
     test('should handle malformed input gracefully', () => {
@@ -232,7 +233,7 @@ describe('RESP Serializer', () => {
     });
 
     test('should maintain empty structures through round-trip', () => {
-      const original: unknown[] = [];
+      const original: RespValue[] = [];
       const serialized = serialize(original);
       const deserialized = deserialize(serialized);
       assert.deepStrictEqual(deserialized, original);
