@@ -3,23 +3,20 @@ import assert from 'node:assert';
 import { Database } from './database';
 
 describe('Database Thread Safety', () => {
-  test('should handle concurrent read/write operations safely', async () => {
+  test('should handle read/write operations safely', () => {
     const db = new Database();
     const key = 'test-key';
-    const operations = [];
 
     // Set an initial value
-    await db.set(key, 'initial-value');
+    db.set(key, 'initial-value');
 
-    // Create 10 concurrent operations that read and write
+    // Perform sequential operations (since they're now synchronous)
+    const results: unknown[] = [];
     for (let i = 0; i < 10; i++) {
-      operations.push(
-        db.set(key, `value-${i}`).then(() => db.get(key))
-      );
+      db.set(key, `value-${i}`);
+      const result = db.get(key);
+      results.push(result);
     }
-
-    // Wait for all operations to complete
-    const results = await Promise.all(operations);
 
     // All operations should have completed successfully
     assert.strictEqual(results.length, 10);
@@ -31,30 +28,27 @@ describe('Database Thread Safety', () => {
       assert(result.startsWith('value-'));
     });
 
-    // The final value should be one of the set values
-    const finalValue = await db.get(key);
-    assert(typeof finalValue === 'string');
-    assert(finalValue.startsWith('value-'));
+    // The final value should be the last set value
+    const finalValue = db.get(key);
+    assert.strictEqual(finalValue, 'value-9');
   });
 
-  test('should handle concurrent delete operations safely', async () => {
+  test('should handle delete operations safely', () => {
     const db = new Database();
 
     // Set up multiple keys
     const keys = ['key1', 'key2', 'key3', 'key4', 'key5'];
     for (const key of keys) {
-      await db.set(key, `value-${key}`);
+      db.set(key, `value-${key}`);
     }
 
-    // Concurrently delete and check existence
-    const operations = keys.map(async (key) => {
-      const exists1 = await db.exists(key);
-      const deleted = await db.delete(key);
-      const exists2 = await db.exists(key);
+    // Delete and check existence for each key
+    const results = keys.map((key) => {
+      const exists1 = db.exists(key);
+      const deleted = db.delete(key);
+      const exists2 = db.exists(key);
       return { key, exists1, deleted, exists2 };
     });
-
-    const results = await Promise.all(operations);
 
     // Verify that each key was properly handled
     results.forEach(({ key, exists1, deleted, exists2 }) => {
@@ -67,118 +61,159 @@ describe('Database Thread Safety', () => {
     });
   });
 
-  test('should handle concurrent size calculations safely', async () => {
+  test('should handle size calculations safely', () => {
     const db = new Database();
-    const operations = [];
 
-    // Perform concurrent set operations and size checks
+    // Perform set operations and size checks
+    const sizes: number[] = [];
     for (let i = 0; i < 5; i++) {
-      operations.push(db.set(`key-${i}`, `value-${i}`));
-      operations.push(db.size());
+      db.set(`key-${i}`, `value-${i}`);
+      sizes.push(db.size());
     }
 
-    const results = await Promise.all(operations);
+    // Size should increase monotonically
+    for (let i = 0; i < sizes.length; i++) {
+      assert.strictEqual(sizes[i], i + 1, `Size should be ${i + 1} after ${i + 1} insertions`);
+    }
 
-    // All operations should complete successfully
-    assert.strictEqual(results.length, 10);
-
-    // Final size should be 5 (all keys set)
-    const finalSize = await db.size();
-    assert.strictEqual(finalSize, 5);
+    // Final size should be 5
+    assert.strictEqual(db.size(), 5);
   });
 
-  test('should handle concurrent expire operations safely', async () => {
+  test('should handle expire operations safely', () => {
     const db = new Database();
-    const key = 'expiring-key';
+    const keys = ['exp1', 'exp2', 'exp3'];
 
-    await db.set(key, 'test-value');
-
-    const operations = [];
-
-    // Multiple concurrent expire operations
-    for (let i = 1; i <= 5; i++) {
-      operations.push(db.expire(key, i));
+    // Set up keys with different expiration times
+    for (let i = 0; i < keys.length; i++) {
+      db.set(keys[i], `value-${i}`, 1); // 1 second TTL
+      const success = db.expire(keys[i], 2); // Extend to 2 seconds
+      assert.strictEqual(success, true, `Should be able to set expiry for ${keys[i]}`);
     }
 
-    const results = await Promise.all(operations);
+    // All keys should still exist
+    keys.forEach(key => {
+      assert.strictEqual(db.exists(key), true, `Key ${key} should exist`);
+      assert(db.ttl(key) > 0, `Key ${key} should have positive TTL`);
+    });
 
-    // At least one expire operation should succeed
-    const successCount = results.filter(result => result === true).length;
-    assert(successCount >= 1, 'At least one expire operation should succeed');
-
-    // Key should still exist (since we set expiry to positive values)
-    const exists = await db.exists(key);
-    assert.strictEqual(exists, true);
-
-    // TTL should be a positive number
-    const ttl = await db.ttl(key);
-    assert(ttl > 0, 'TTL should be positive');
+    // Setting expiry on non-existent key should fail
+    const success = db.expire('non-existent', 10);
+    assert.strictEqual(success, false, 'Should not be able to set expiry on non-existent key');
   });
 
-  test('should handle concurrent keys operations safely', async () => {
+  test('should handle keys operations safely', () => {
     const db = new Database();
-    const operations = [];
 
-    // Set up some keys concurrently
-    for (let i = 0; i < 5; i++) {
-      operations.push(db.set(`pattern-${i}`, `value-${i}`));
-    }
+    // Set up keys with patterns
+    const patterns = ['user:1', 'user:2', 'admin:1', 'temp:data'];
+    patterns.forEach((key, i) => {
+      db.set(key, `value-${i}`);
+    });
 
-    await Promise.all(operations);
+    // Test pattern matching
+    const userKeys = db.keys('user:*');
+    assert.strictEqual(userKeys.length, 2);
+    assert(userKeys.includes('user:1'));
+    assert(userKeys.includes('user:2'));
 
-    // Concurrent keys operations with different patterns
-    const keyOperations = [
-      db.keys('*'),
-      db.keys('pattern-*'),
-      db.keys('pattern-1'),
-      db.keys('nonexistent-*')
-    ];
+    const allKeys = db.keys('*');
+    assert.strictEqual(allKeys.length, 4);
 
-    const keyResults = await Promise.all(keyOperations);
-
-    // All keys
-    assert.strictEqual(keyResults[0].length, 5);
-
-    // Pattern match
-    assert.strictEqual(keyResults[1].length, 5);
-
-    // Specific key
-    assert.strictEqual(keyResults[2].length, 1);
-    assert.strictEqual(keyResults[2][0], 'pattern-1');
-
-    // Non-existent pattern
-    assert.strictEqual(keyResults[3].length, 0);
+    const adminKeys = db.keys('admin:*');
+    assert.strictEqual(adminKeys.length, 1);
+    assert.strictEqual(adminKeys[0], 'admin:1');
   });
 
-  test('AsyncLock should work correctly with withLock', async () => {
+  test('should handle TTL operations correctly', () => {
     const db = new Database();
-    let counter = 0;
-    const operations = [];
 
-    // Create 10 concurrent operations that increment a counter
-    for (let i = 0; i < 10; i++) {
-      operations.push(
-        // Access the private lock for testing purposes
-        (db as any).lock.withLock(async () => {
-          const current = counter;
-          // Simulate some async work
-          await new Promise(resolve => setTimeout(resolve, 1));
-          counter = current + 1;
-          return counter;
-        })
-      );
+    // Test TTL on non-existent key
+    assert.strictEqual(db.ttl('non-existent'), -1);
+
+    // Test TTL on key without expiry
+    db.set('no-expiry', 'value');
+    assert.strictEqual(db.ttl('no-expiry'), -1);
+
+    // Test TTL on key with expiry
+    db.set('with-expiry', 'value', 10);
+    const ttl = db.ttl('with-expiry');
+    assert(ttl > 0 && ttl <= 10, 'TTL should be positive and <= 10');
+  });
+
+  test('should handle basic CRUD operations', () => {
+    const db = new Database();
+
+    // Test set and get
+    db.set('test', 'value');
+    assert.strictEqual(db.get('test'), 'value');
+
+    // Test exists
+    assert.strictEqual(db.exists('test'), true);
+    assert.strictEqual(db.exists('non-existent'), false);
+
+    // Test delete
+    assert.strictEqual(db.delete('test'), true);
+    assert.strictEqual(db.exists('test'), false);
+    assert.strictEqual(db.get('test'), null);
+
+    // Test delete non-existent
+    assert.strictEqual(db.delete('non-existent'), false);
+  });
+
+  test('should handle TTL expiration correctly', () => {
+    const db = new Database();
+
+    // Set a key with very short TTL (using direct expiry manipulation for testing)
+    const now = Date.now();
+    db.set('short-ttl', 'value');
+
+    // Manually set expiry to past (simulate expired key)
+    const entry = (db as any).store.get('short-ttl');
+    if (entry) {
+      entry.expiry = now - 1000; // Expired 1 second ago
     }
 
-    const results = await Promise.all(operations);
+    // Key should be considered expired
+    assert.strictEqual(db.get('short-ttl'), null);
+    assert.strictEqual(db.exists('short-ttl'), false);
+    assert.strictEqual(db.ttl('short-ttl'), -1);
+  });
 
-    // Without proper locking, this would be subject to race conditions
-    // With proper locking, the counter should reach exactly 10
-    assert.strictEqual(counter, 10);
+  test('should handle cleanup operations', () => {
+    const db = new Database();
 
-    // Results should be sequential numbers from 1 to 10
-    const sortedResults = results.sort((a, b) => a - b);
-    for (let i = 0; i < 10; i++) {
-      assert.strictEqual(sortedResults[i], i + 1);
+    // Add some keys
+    db.set('key1', 'value1');
+    db.set('key2', 'value2');
+    db.set('key3', 'value3');
+
+    // Manual cleanup should return 0 (no expired keys)
+    assert.strictEqual(db.cleanupExpired(), 0);
+
+    // Set one key to be expired
+    const entry = (db as any).store.get('key2');
+    if (entry) {
+      entry.expiry = Date.now() - 1000;
     }
+
+    // Cleanup should remove 1 key
+    assert.strictEqual(db.cleanupExpired(), 1);
+    assert.strictEqual(db.size(), 2);
+  });
+
+  test('should handle clear operation', () => {
+    const db = new Database();
+
+    // Add some data
+    db.set('key1', 'value1');
+    db.set('key2', 'value2');
+    assert.strictEqual(db.size(), 2);
+
+    // Clear should remove everything
+    assert.strictEqual(db.clear(), true);
+    assert.strictEqual(db.size(), 0);
+    assert.strictEqual(db.exists('key1'), false);
+    assert.strictEqual(db.exists('key2'), false);
   });
 });
