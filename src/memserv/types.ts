@@ -9,6 +9,7 @@ export enum Command {
   Clear = "clear",
   Expire = "expire",
   Ttl = "ttl",
+  Info = "info",
 }
 
 export interface CommandParams {
@@ -42,6 +43,9 @@ export interface CommandParams {
   },
   [Command.Ttl]: {
     key: string,
+  },
+  [Command.Info]: {
+    section?: string,
   }
 }
 

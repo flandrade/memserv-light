@@ -14,7 +14,10 @@
     "dev": "ts-node src/server.ts",
     "dev:cli": "ts-node src/cli.ts",
     "test": "npm run test:serializer",
-    "test:serializer": "tsx --test src/serializer/serializer.test.ts"
+    "test:serializer": "tsx --test src/serializer/serializer.test.ts",
+    "benchmark": "./scripts/benchmark-profile.sh",
+    "benchmark:quick": "./scripts/quick-benchmark.sh",
+    "profile": "./scripts/profile-only.sh"
   },
   "dependencies": {
     "commander": "^11.1.0",

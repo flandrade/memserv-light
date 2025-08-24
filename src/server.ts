@@ -5,8 +5,13 @@ import { MemServLight } from "./memserv";
 const memServ = new MemServLight();
 
 const server: net.Server = net.createServer((connection: net.Socket) => {
+  const addr = connection.remoteAddress || 'unknown';
+  const port = connection.remotePort || 'unknown';
+
+  let hasReceivedData = false;
 
   connection.on("data", (data) => {
+    hasReceivedData = true;
     try {
       const commandString = data.toString("utf-8");
 
@@ -29,7 +34,10 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
   });
 
   connection.on("close", () => {
-    console.log(`Client disconnected: ${connection.remoteAddress}:${connection.remotePort}`);
+    // Only log disconnections if no data was received (likely port scans/health checks)
+    if (!hasReceivedData) {
+      console.log(`Connection from ${addr}:${port} closed without sending data (port scan/health check)`);
+    }
   });
 });
 

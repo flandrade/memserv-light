@@ -4,6 +4,8 @@ import { Database } from "../store/database";
 
 export class MemServLight {
   private db: Database = new Database();
+  private lastInfoUpdate: number = 0;
+  private cachedInfoResponse: string = '';
 
   execute({ command, params }: AnyCommandStructure): string {
     switch(command) {
@@ -36,6 +38,9 @@ export class MemServLight {
       }
       case Command.Ttl: {
         return this.ttl(params);
+      }
+      case Command.Info: {
+        return this.info(params);
       }
       default:
         return formatResponse('ERROR', 'Unknown command');
@@ -168,6 +173,14 @@ export class MemServLight {
             }
           }
         }
+        case 'info': {
+          return {
+            command: Command.Info,
+            params: {
+              section: args[0],
+            }
+          }
+        }
     }
 
     return null;
@@ -232,5 +245,53 @@ export class MemServLight {
   private ttl({ key }: CommandParams[Command.Ttl]): string {
     const ttl = this.db.ttl(key);
     return serialize(ttl);
+  }
+
+    // Pre-computed static parts of INFO response
+  private static readonly INFO_STATIC =
+    '# Server\r\n' +
+    'redis_version:memserv-light-1.0.0\r\n' +
+    'redis_mode:standalone\r\n' +
+    'tcp_port:6379\r\n';
+
+  private static readonly INFO_MEMORY_PREFIX =
+    '\r\n# Memory\r\n' +
+    'used_memory:';
+
+  private static readonly INFO_MEMORY_HUMAN_PREFIX =
+    '\r\nused_memory_human:';
+
+  private static readonly INFO_STATS =
+    '\r\n\r\n# Stats\r\n' +
+    'total_connections_received:0\r\n' +
+    'total_commands_processed:0\r\n' +
+    '\r\n# Keyspace\r\n' +
+    'db0:keys=';
+
+  private static readonly INFO_KEYSPACE_SUFFIX = ',expires=0,avg_ttl=0';
+
+  private info({ section }: CommandParams[Command.Info]): string {
+    const now = Date.now();
+
+    // Cache INFO response for 500ms to avoid expensive calculations
+    if (now - this.lastInfoUpdate > 500) {
+      const uptime = Math.floor(process.uptime());
+      const memUsed = Math.round(process.memoryUsage().heapUsed);
+      const memHuman = Math.round(memUsed / 1048576); // /1024/1024 optimized
+      const keyCount = this.db.size();
+
+      const infoString =
+        MemServLight.INFO_STATIC +
+        'uptime_in_seconds:' + uptime +
+        MemServLight.INFO_MEMORY_PREFIX + memUsed +
+        MemServLight.INFO_MEMORY_HUMAN_PREFIX + memHuman + 'M' +
+        MemServLight.INFO_STATS + keyCount +
+        MemServLight.INFO_KEYSPACE_SUFFIX;
+
+      this.cachedInfoResponse = serialize(infoString);
+      this.lastInfoUpdate = now;
+    }
+
+    return this.cachedInfoResponse;
   }
 }
