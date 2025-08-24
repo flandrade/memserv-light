@@ -33,40 +33,65 @@ export enum RespType {
   Array = '*'
 }
 
+// Pre-computed constants for common responses
+const OK_RESPONSE = `${RespType.SimpleString}OK${CRLF}`;
+const PONG_RESPONSE = `${RespType.SimpleString}PONG${CRLF}`;
+const ZERO_INT = `${RespType.Integer}0${CRLF}`;
+const ONE_INT = `${RespType.Integer}1${CRLF}`;
+const EMPTY_ARRAY = `${RespType.Array}0${CRLF}`;
+
 export const serialize = (data: RespValue): string => {
   if (data === null) return NULL_BULK_STRING;
 
   switch (typeof data) {
     case 'string':
-      return `${RespType.SimpleString}${data}${CRLF}`;
+      return RespType.SimpleString + data + CRLF;
     case 'number':
       if (!Number.isInteger(data)) {
         throw new RespSerializeError('RESP only supports integers', data);
       }
-      return `${RespType.Integer}${data}${CRLF}`;
+      // Use pre-computed constants for common numbers
+      if (data === 0) return ZERO_INT;
+      if (data === 1) return ONE_INT;
+      return RespType.Integer + data + CRLF;
     case 'boolean':
-      return `${RespType.Integer}${data ? 1 : 0}${CRLF}`;
+      return data ? ONE_INT : ZERO_INT;
   }
 
   if (Array.isArray(data)) {
-    const parts = [`${RespType.Array}${data.length}${CRLF}`];
+    if (data.length === 0) return EMPTY_ARRAY;
+
+    // Use array buffer for better performance with large arrays
+    let result = RespType.Array + data.length + CRLF;
     for (const item of data) {
-      parts.push(serialize(item));
+      result += serialize(item);
     }
-    return parts.join('');
+    return result;
   }
 
   // Fallback to bulk string
   const str = String(data);
-  return `${RespType.BulkString}${str.length}${CRLF}${str}${CRLF}`;
+  return RespType.BulkString + str.length + CRLF + str + CRLF;
 };
+
+// Cache for split results to avoid repeated splitting
+const splitCache = new Map<string, string[]>();
+const MAX_CACHE_SIZE = 100;
 
 export const deserialize = (data: string): RespValue => {
   if (!data || data.length === 0) {
     throw new RespSerializeError('Empty input data');
   }
 
-  const lines = data.split(CRLF);
+  // Use cache for commonly repeated commands
+  let lines = splitCache.get(data);
+  if (!lines) {
+    lines = data.split(CRLF);
+    if (splitCache.size < MAX_CACHE_SIZE) {
+      splitCache.set(data, lines);
+    }
+  }
+
   return parseValue(lines, 0).value;
 };
 
@@ -147,11 +172,11 @@ const parseValue = (lines: readonly string[], index: number): ParseResult => {
 export const formatResponse = (status: 'OK' | 'ERROR' | 'PONG' | 'DATA' | 'NULL',  data?: RespValue): string => {
   switch (status) {
     case 'OK':
-      return `${RespType.SimpleString}OK${CRLF}`;
+      return OK_RESPONSE;
     case 'ERROR':
       return `${RespType.Error}ERROR ${data || 'Unknown error'}${CRLF}`;
     case 'PONG':
-      return `${RespType.SimpleString}PONG${CRLF}`;
+      return PONG_RESPONSE;
     case 'NULL':
       return NULL_BULK_STRING;
     case 'DATA':

@@ -42,42 +42,63 @@ export class MemServLight {
     }
   }
 
+  // Pre-created command objects to avoid object creation overhead
+  private static readonly COMMAND_OBJECTS = {
+    ping: { command: Command.Ping, params: {} },
+    clear: { command: Command.Clear, params: {} }
+  } as const;
+
   parse(request: string): AnyCommandStructure | null {
     const parsed = deserialize(request);
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    const parts = parsed.map(String);
+
+    // Avoid map() allocation for small arrays
+    const parts = new Array(parsed.length);
+    for (let i = 0; i < parsed.length; i++) {
+      parts[i] = String(parsed[i]);
+    }
 
     const [command, ...args] = parts;
     const normalizedCommand = command.toLowerCase();
 
     switch(normalizedCommand) {
-        case 'ping':{
-          return {
-            command: Command.Ping,
-            params: {},
-          }
-        }
+        case 'ping':
+          return MemServLight.COMMAND_OBJECTS.ping;
         case 'echo': {
           return {
             command: Command.Echo,
             params: {
-              text: args.join(' ') || '',
+              text: args.length > 0 ? args.join(' ') : '',
             }
           }
         }
         case 'set': {
           if (args.length < 2) return null;
 
-          // Check for TTL option (SET key value EX seconds)
+          // Optimize TTL parsing
           let ttl: number | undefined;
-          let value = args.slice(1).join(' ');
+          let value: string;
 
-          if (args.length >= 4 && args[args.length - 2].toLowerCase() === 'ex') {
+          // Fast path: check if EX is present
+          const exIndex = args.length - 2;
+          if (args.length >= 4 && args[exIndex] === 'EX') {
             const ttlValue = parseInt(args[args.length - 1], 10);
             if (!Number.isNaN(ttlValue)) {
               ttl = ttlValue;
-              value = args.slice(1, -2).join(' ');
+              // Build value string without creating intermediate arrays
+              if (exIndex === 1) {
+                value = '';
+              } else {
+                value = args[1];
+                for (let i = 2; i < exIndex; i++) {
+                  value += ' ' + args[i];
+                }
+              }
+            } else {
+              value = args.slice(1).join(' ');
             }
+          } else {
+            value = args.slice(1).join(' ');
           }
 
           return {
@@ -124,12 +145,8 @@ export class MemServLight {
             }
           }
         }
-        case 'clear': {
-          return {
-            command: Command.Clear,
-            params: {},
-          }
-        }
+        case 'clear':
+          return MemServLight.COMMAND_OBJECTS.clear;
         case 'expire': {
           if (args.length < 2) return null;
           const seconds = parseInt(args[1], 10);
@@ -160,34 +177,41 @@ export class MemServLight {
     return serialize(response);
   }
 
+  // Pre-computed response strings for common cases
+  private static readonly PONG_RESPONSE = formatResponse('PONG');
+  private static readonly OK_RESPONSE = formatResponse('OK');
+  private static readonly NULL_RESPONSE = formatResponse('NULL');
+  private static readonly ZERO_RESPONSE = serialize(0);
+  private static readonly ONE_RESPONSE = serialize(1);
+
   private echo({ text }: CommandParams[Command.Echo]) {
     return formatResponse('DATA', text);
   }
 
   private ping({ timeout: _ }: CommandParams[Command.Ping]) {
-    return formatResponse('PONG');
+    return MemServLight.PONG_RESPONSE;
   }
 
   private set({ key, value, ttl}: CommandParams[Command.Set]): string {
     this.db.set(key, value, ttl);
-    return formatResponse('OK');
+    return MemServLight.OK_RESPONSE;
   }
 
   private get({ key }: CommandParams[Command.Get]): string {
     const value = this.db.get(key);
-    if (value === null) return formatResponse('NULL');
+    if (value === null) return MemServLight.NULL_RESPONSE;
 
     return serialize(value as string);
   }
 
   private del({ key }: CommandParams[Command.Del]): string {
     const deleted = this.db.delete(key);
-    return serialize(deleted ? 1 : 0);
+    return deleted ? MemServLight.ONE_RESPONSE : MemServLight.ZERO_RESPONSE;
   }
 
   private exists({ key }: CommandParams[Command.Exists]): string {
     const exists = this.db.exists(key);
-    return serialize(exists ? 1 : 0);
+    return exists ? MemServLight.ONE_RESPONSE : MemServLight.ZERO_RESPONSE;
   }
 
   private keys({ pattern }: CommandParams[Command.Keys]): string {
@@ -197,12 +221,12 @@ export class MemServLight {
 
   private clear(_params: CommandParams[Command.Clear]): string {
     this.db.clear();
-    return formatResponse('OK');
+    return MemServLight.OK_RESPONSE;
   }
 
   private expire({ key, seconds }: CommandParams[Command.Expire]): string {
     const success = this.db.expire(key, seconds);
-    return serialize(success ? 1 : 0);
+    return success ? MemServLight.ONE_RESPONSE : MemServLight.ZERO_RESPONSE;
   }
 
   private ttl({ key }: CommandParams[Command.Ttl]): string {
