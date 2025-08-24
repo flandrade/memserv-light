@@ -239,6 +239,4 @@ describe('RESP Serializer', () => {
       assert.deepStrictEqual(deserialized, original);
     });
   });
-
-
 });

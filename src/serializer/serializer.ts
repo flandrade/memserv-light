@@ -1,6 +1,14 @@
 /*
   RESP (Redis Serialization Protocol)
   https://redis.io/docs/latest/develop/reference/protocol-spec/
+
+  Simple string: +<string>\r\n
+  Error: -<string>\r\n
+  Integer: :<integer>\r\n
+  Bulk string: $<integer>\r\n<string>\r\n
+  Array: *<integer>\r\n<array>\r\n
+
+  This file is a simplified implementation of the RESP protocol.
 */
 
 import { RespSerializeError } from '../utils/error';
@@ -136,12 +144,16 @@ const parseValue = (lines: readonly string[], index: number): ParseResult => {
   }
 };
 
-export const formatResponse = (status: 'OK' | 'ERROR' | 'DATA', data?: RespValue): string => {
+export const formatResponse = (status: 'OK' | 'ERROR' | 'PONG' | 'DATA' | 'NULL',  data?: RespValue): string => {
   switch (status) {
     case 'OK':
       return `${RespType.SimpleString}OK${CRLF}`;
     case 'ERROR':
       return `${RespType.Error}ERROR ${data || 'Unknown error'}${CRLF}`;
+    case 'PONG':
+      return `${RespType.SimpleString}PONG${CRLF}`;
+    case 'NULL':
+      return NULL_BULK_STRING;
     case 'DATA':
       return data !== undefined ? serialize(data) : NULL_BULK_STRING;
     default:
