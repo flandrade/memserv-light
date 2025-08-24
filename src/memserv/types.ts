@@ -3,6 +3,12 @@ export enum Command {
   Ping = "ping",
   Set = "set",
   Get = "get",
+  Del = "del",
+  Exists = "exists",
+  Keys = "keys",
+  Clear = "clear",
+  Expire = "expire",
+  Ttl = "ttl",
 }
 
 export interface CommandParams {
@@ -15,8 +21,26 @@ export interface CommandParams {
   [Command.Set]: {
     key: string,
     value: string,
+    ttl?: number,
   },
   [Command.Get]: {
+    key: string,
+  },
+  [Command.Del]: {
+    key: string,
+  },
+  [Command.Exists]: {
+    key: string,
+  },
+  [Command.Keys]: {
+    pattern?: string,
+  },
+  [Command.Clear]: Record<string, never>,
+  [Command.Expire]: {
+    key: string,
+    seconds: number,
+  },
+  [Command.Ttl]: {
     key: string,
   }
 }

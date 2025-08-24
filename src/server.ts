@@ -5,22 +5,46 @@ import { MemServLight } from "./memserv";
 const memServ = new MemServLight();
 
 const server: net.Server = net.createServer((connection: net.Socket) => {
+
   connection.on("data", (data) => {
     try {
-    const commandString = data.toString("utf-8");
-    const parsedCommand = memServ.parse(commandString);
+      const commandString = data.toString("utf-8");
 
-    if (!parsedCommand) {
-      connection.write("ERROR");
-      return;
-    }
+      const parsedCommand = memServ.parse(commandString);
 
-    const response = memServ.execute(parsedCommand);
-    connection.write(response);
-  } catch(err) {
-      console.log(err);
+      if (!parsedCommand) {
+        connection.write("-ERROR Invalid command\r\n");
+        return;
+      }
+
+      const response = memServ.execute(parsedCommand);
+      connection.write(response);
+    } catch (err) {
+      connection.write("-ERROR Internal server error\r\n");
     }
-  })
+  });
+
+  connection.on("error", (err) => {
+    console.error("Connection error:", err);
+  });
+
+  connection.on("close", () => {
+    console.log(`Client disconnected: ${connection.remoteAddress}:${connection.remotePort}`);
+  });
 });
 
-server.listen(6379, "127.0.0.1");
+server.listen(6379, "127.0.0.1", () => {
+  console.log("MemServLight server listening on 127.0.0.1:6379");
+});
+
+// Graceful shutdown
+const shutdown = () => {
+  console.log("Shutting down server...");
+  server.close(() => {
+    console.log("Server closed");
+    process.exit(0);
+  });
+};
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
