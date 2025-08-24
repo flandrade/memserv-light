@@ -49,7 +49,7 @@ npm run build
 echo -e "${BLUE}Starting MemServLight server...${NC}"
 
 # Start the server in the background with memory/performance optimizations
-NODE_OPTIONS="--max-old-space-size=2048" node dist/server.js &
+NODE_OPTIONS="--max-old-space-size=4096" node dist/server.js &
 SERVER_PID=$!
 
 # Function to cleanup server on exit
@@ -89,7 +89,7 @@ CLIENTS=(1 10 50 100 200 300 400 500 600 700 800)
 OPERATIONS=10000
 
 # CSV header
-echo "clients,set_rps,get_rps,set_latency_p50,get_latency_p50" > "$RESULTS_DIR/benchmark_results.csv"
+echo "clients,set_rps,get_rps,set_latency_p50,get_latency_p50,set_latency_p95,get_latency_p95,set_latency_max,get_latency_max" > "$RESULTS_DIR/benchmark_results.csv"
 
 # Raise file-descriptor limit for this run
 TARGET_NOFILE=65536
@@ -114,7 +114,7 @@ for clients in "${CLIENTS[@]}"; do
         SET_OUTPUT=$(cat /tmp/set_output.txt)
     else
         echo -e "${RED}SET benchmark timed out or failed for $clients clients${NC}"
-        echo "$clients,TIMEOUT,TIMEOUT,TIMEOUT,TIMEOUT" >> "$RESULTS_DIR/benchmark_results.csv"
+        echo "$clients,TIMEOUT,TIMEOUT,TIMEOUT,TIMEOUT,TIMEOUT,TIMEOUT,TIMEOUT,TIMEOUT" >> "$RESULTS_DIR/benchmark_results.csv"
         continue
     fi
 
@@ -122,15 +122,14 @@ for clients in "${CLIENTS[@]}"; do
     SET_RPS=$(echo "$SET_OUTPUT" | grep -E "requests per second" | grep -oE '[0-9]+\.[0-9]+' | head -1)
     SET_P50=$(echo "$SET_OUTPUT" | grep -E "50\.000% <=" | grep -oE '<= [0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -1)
 
+    # Parse P95 and max from latency summary line (avg min p50 p95 p99 max)
+    SET_LATENCY_LINE=$(echo "$SET_OUTPUT" | grep -A2 "latency summary" | tail -1)
+    SET_P95=$(echo "$SET_LATENCY_LINE" | grep -oE '[0-9]+\.[0-9]+' | sed -n '4p')
+    SET_MAX=$(echo "$SET_LATENCY_LINE" | grep -oE '[0-9]+\.[0-9]+' | sed -n '6p')
+
     # If parsing failed, try alternative patterns
     if [[ -z "$SET_RPS" ]]; then
         SET_RPS=$(echo "$SET_OUTPUT" | grep -oE '[0-9]+\.[0-9]+ requests per second' | grep -oE '[0-9]+\.[0-9]+')
-    fi
-
-    # Check if server is still running after SET test
-    if ! kill -0 $SERVER_PID 2>/dev/null; then
-        echo -e "${RED}Error: Server crashed during SET benchmark${NC}"
-        break
     fi
 
     # Run GET benchmark with timeout
@@ -140,13 +139,18 @@ for clients in "${CLIENTS[@]}"; do
         GET_OUTPUT=$(cat /tmp/get_output.txt)
     else
         echo -e "${RED}GET benchmark timed out or failed for $clients clients${NC}"
-        echo "$clients,$SET_RPS,TIMEOUT,$SET_P50,TIMEOUT" >> "$RESULTS_DIR/benchmark_results.csv"
+        echo "$clients,$SET_RPS,TIMEOUT,$SET_P50,TIMEOUT,$SET_P95,TIMEOUT,$SET_MAX,TIMEOUT" >> "$RESULTS_DIR/benchmark_results.csv"
         continue
     fi
 
     # Parse GET results with fallback
     GET_RPS=$(echo "$GET_OUTPUT" | grep -E "requests per second" | grep -oE '[0-9]+\.[0-9]+' | head -1)
     GET_P50=$(echo "$GET_OUTPUT" | grep -E "50\.000% <=" | grep -oE '<= [0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+' | head -1)
+
+    # Parse P95 and max from latency summary line (avg min p50 p95 p99 max)
+    GET_LATENCY_LINE=$(echo "$GET_OUTPUT" | grep -A2 "latency summary" | tail -1)
+    GET_P95=$(echo "$GET_LATENCY_LINE" | grep -oE '[0-9]+\.[0-9]+' | sed -n '4p')
+    GET_MAX=$(echo "$GET_LATENCY_LINE" | grep -oE '[0-9]+\.[0-9]+' | sed -n '6p')
 
     # If parsing failed, try alternative patterns
     if [[ -z "$GET_RPS" ]]; then
@@ -158,12 +162,16 @@ for clients in "${CLIENTS[@]}"; do
     GET_RPS=${GET_RPS:-"0"}
     SET_P50=${SET_P50:-"0"}
     GET_P50=${GET_P50:-"0"}
+    SET_P95=${SET_P95:-"0"}
+    GET_P95=${GET_P95:-"0"}
+    SET_MAX=${SET_MAX:-"0"}
+    GET_MAX=${GET_MAX:-"0"}
 
     # Save to CSV
-    echo "$clients,$SET_RPS,$GET_RPS,$SET_P50,$GET_P50" >> "$RESULTS_DIR/benchmark_results.csv"
+    echo "$clients,$SET_RPS,$GET_RPS,$SET_P50,$GET_P50,$SET_P95,$GET_P95,$SET_MAX,$GET_MAX" >> "$RESULTS_DIR/benchmark_results.csv"
 
-    echo "  SET: $SET_RPS ops/sec (P50: ${SET_P50}ms)"
-    echo "  GET: $GET_RPS ops/sec (P50: ${GET_P50}ms)"
+    echo "  SET: $SET_RPS ops/sec (P50: ${SET_P50}ms, P95: ${SET_P95}ms, Max: ${SET_MAX}ms)"
+    echo "  GET: $GET_RPS ops/sec (P50: ${GET_P50}ms, P95: ${GET_P95}ms, Max: ${GET_MAX}ms)"
 
     # Brief pause between tests to let server recover
     sleep 3
@@ -189,7 +197,7 @@ EOF
 
 # Generate gnuplot script for latency
 cat > "$RESULTS_DIR/latency.gnuplot" << 'EOF'
-set terminal png size 1024,768
+set terminal png size 1200,900
 set output 'latency_comparison.png'
 set title 'MemServLight Latency vs Concurrent Clients'
 set xlabel 'Concurrent Clients'
@@ -199,7 +207,11 @@ set key outside right top
 set datafile separator ','
 set logscale x 2
 plot 'benchmark_results.csv' using 1:4 with linespoints linewidth 2 pointtype 7 title 'SET P50 Latency', \
-     'benchmark_results.csv' using 1:5 with linespoints linewidth 2 pointtype 9 title 'GET P50 Latency'
+     'benchmark_results.csv' using 1:5 with linespoints linewidth 2 pointtype 9 title 'GET P50 Latency', \
+     'benchmark_results.csv' using 1:6 with linespoints linewidth 2 pointtype 5 title 'SET P95 Latency', \
+     'benchmark_results.csv' using 1:7 with linespoints linewidth 2 pointtype 11 title 'GET P95 Latency', \
+     'benchmark_results.csv' using 1:8 with linespoints linewidth 1 pointtype 3 title 'SET Max Latency', \
+     'benchmark_results.csv' using 1:9 with linespoints linewidth 1 pointtype 13 title 'GET Max Latency'
 EOF
 
 # Generate the graphs
