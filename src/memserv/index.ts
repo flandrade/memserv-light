@@ -7,7 +7,7 @@ export class MemServLight {
   private lastInfoUpdate: number = 0;
   private cachedInfoResponse: string = '';
 
-  execute({ command, params }: AnyCommandStructure): string {
+  async execute({ command, params }: AnyCommandStructure): Promise<string> {
     switch(command) {
       case Command.Ping:{
         return this.ping(params);
@@ -16,31 +16,31 @@ export class MemServLight {
         return this.echo(params);
       }
       case Command.Set: {
-        return this.set(params);
+        return await this.set(params);
       }
       case Command.Get: {
-        return this.get(params);
+        return await this.get(params);
       }
       case Command.Del: {
-        return this.del(params);
+        return await this.del(params);
       }
       case Command.Exists: {
-        return this.exists(params);
+        return await this.exists(params);
       }
       case Command.Keys: {
-        return this.keys(params);
+        return await this.keys(params);
       }
       case Command.Clear: {
-        return this.clear(params);
+        return await this.clear(params);
       }
       case Command.Expire: {
-        return this.expire(params);
+        return await this.expire(params);
       }
       case Command.Ttl: {
-        return this.ttl(params);
+        return await this.ttl(params);
       }
       case Command.Info: {
-        return this.info(params);
+        return await this.info(params);
       }
       default:
         return formatResponse('ERROR', 'Unknown command');
@@ -58,7 +58,7 @@ export class MemServLight {
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
 
     // Avoid map() allocation for small arrays
-    const parts = new Array(parsed.length);
+    const parts: string[] = new Array(parsed.length);
     for (let i = 0; i < parsed.length; i++) {
       parts[i] = String(parsed[i]);
     }
@@ -205,45 +205,45 @@ export class MemServLight {
     return MemServLight.PONG_RESPONSE;
   }
 
-  private set({ key, value, ttl}: CommandParams[Command.Set]): string {
-    this.db.set(key, value, ttl);
+  private async set({ key, value, ttl}: CommandParams[Command.Set]): Promise<string> {
+    await this.db.set(key, value, ttl);
     return MemServLight.OK_RESPONSE;
   }
 
-  private get({ key }: CommandParams[Command.Get]): string {
-    const value = this.db.get(key);
+  private async get({ key }: CommandParams[Command.Get]): Promise<string> {
+    const value = await this.db.get(key);
     if (value === null) return MemServLight.NULL_RESPONSE;
 
     return serialize(value as string);
   }
 
-  private del({ key }: CommandParams[Command.Del]): string {
-    const deleted = this.db.delete(key);
+  private async del({ key }: CommandParams[Command.Del]): Promise<string> {
+    const deleted = await this.db.delete(key);
     return deleted ? MemServLight.ONE_RESPONSE : MemServLight.ZERO_RESPONSE;
   }
 
-  private exists({ key }: CommandParams[Command.Exists]): string {
-    const exists = this.db.exists(key);
+  private async exists({ key }: CommandParams[Command.Exists]): Promise<string> {
+    const exists = await this.db.exists(key);
     return exists ? MemServLight.ONE_RESPONSE : MemServLight.ZERO_RESPONSE;
   }
 
-  private keys({ pattern }: CommandParams[Command.Keys]): string {
-    const keys = this.db.keys(pattern || '*');
+  private async keys({ pattern }: CommandParams[Command.Keys]): Promise<string> {
+    const keys = await this.db.keys(pattern || '*');
     return serialize(keys);
   }
 
-  private clear(_params: CommandParams[Command.Clear]): string {
-    this.db.clear();
+  private async clear(_params: CommandParams[Command.Clear]): Promise<string> {
+    await this.db.clear();
     return MemServLight.OK_RESPONSE;
   }
 
-  private expire({ key, seconds }: CommandParams[Command.Expire]): string {
-    const success = this.db.expire(key, seconds);
+  private async expire({ key, seconds }: CommandParams[Command.Expire]): Promise<string> {
+    const success = await this.db.expire(key, seconds);
     return success ? MemServLight.ONE_RESPONSE : MemServLight.ZERO_RESPONSE;
   }
 
-  private ttl({ key }: CommandParams[Command.Ttl]): string {
-    const ttl = this.db.ttl(key);
+  private async ttl({ key }: CommandParams[Command.Ttl]): Promise<string> {
+    const ttl = await this.db.ttl(key);
     return serialize(ttl);
   }
 
@@ -270,7 +270,7 @@ export class MemServLight {
 
   private static readonly INFO_KEYSPACE_SUFFIX = ',expires=0,avg_ttl=0';
 
-  private info({ section }: CommandParams[Command.Info]): string {
+  private async info({ section: _ }: CommandParams[Command.Info]): Promise<string> {
     const now = Date.now();
 
     // Cache INFO response for 500ms to avoid expensive calculations
@@ -278,7 +278,7 @@ export class MemServLight {
       const uptime = Math.floor(process.uptime());
       const memUsed = Math.round(process.memoryUsage().heapUsed);
       const memHuman = Math.round(memUsed / 1048576); // /1024/1024 optimized
-      const keyCount = this.db.size();
+      const keyCount = await this.db.size();
 
       const infoString =
         MemServLight.INFO_STATIC +

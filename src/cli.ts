@@ -9,7 +9,7 @@ import { deserialize } from './serializer/serializer';
 const memServLight = new MemServLight();
 
 
-const executeCommand = (command: string): void => {
+const executeCommand = async (command: string): Promise<void> => {
   try {
     const parsedCommand = memServLight.parse(command);
 
@@ -18,7 +18,7 @@ const executeCommand = (command: string): void => {
       return;
     }
 
-    const response = memServLight.execute(parsedCommand);
+    const response = await memServLight.execute(parsedCommand);
 
     try {
       const value = deserialize(response);
@@ -56,7 +56,9 @@ const startInteractive = (): void => {
         rl.close();
         return;
       default:
-        executeCommand(command);
+        executeCommand(command).catch(error => {
+          console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
+        });
     }
 
     rl.prompt();

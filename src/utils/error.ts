@@ -4,3 +4,11 @@ export class RespSerializeError extends Error {
     this.name = 'RespSerializeError';
   }
 }
+
+
+export class AsyncLockError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AsyncLockError';
+  }
+}

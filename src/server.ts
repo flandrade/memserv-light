@@ -5,16 +5,9 @@ import { MemServLight } from "./memserv";
 const memServ = new MemServLight();
 
 const server: net.Server = net.createServer((connection: net.Socket) => {
-  const addr = connection.remoteAddress || 'unknown';
-  const port = connection.remotePort || 'unknown';
-
-  let hasReceivedData = false;
-
-  connection.on("data", (data) => {
-    hasReceivedData = true;
+  connection.on("data", async (data) => {
     try {
       const commandString = data.toString("utf-8");
-
       const parsedCommand = memServ.parse(commandString);
 
       if (!parsedCommand) {
@@ -22,22 +15,16 @@ const server: net.Server = net.createServer((connection: net.Socket) => {
         return;
       }
 
-      const response = memServ.execute(parsedCommand);
+      const response = await memServ.execute(parsedCommand);
       connection.write(response);
     } catch (err) {
+      console.error('Command execution error:', err);
       connection.write("-ERROR Internal server error\r\n");
     }
   });
 
   connection.on("error", (err) => {
     console.error("Connection error:", err);
-  });
-
-  connection.on("close", () => {
-    // Only log disconnections if no data was received (likely port scans/health checks)
-    if (!hasReceivedData) {
-      console.log(`Connection from ${addr}:${port} closed without sending data (port scan/health check)`);
-    }
   });
 });
 
