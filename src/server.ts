@@ -1,8 +1,26 @@
 import * as net from "net";
 import { MemServLight } from "./memserv";
 
-// Create a single instance to handle all connections
 const memServ = new MemServLight();
+
+// Initialize persistence
+const AOF_FILE = './data/appendonly.aof';
+
+(async () => {
+  try {
+    memServ.enablePersistence(AOF_FILE);
+    const restored = await memServ.restoreFromPersistence(AOF_FILE);
+    if (restored) {
+      console.log('Persistence initialized and data restored');
+    } else {
+      console.log('Failed to restore from AOF file');
+    }
+  } catch (error) {
+    console.error('Failed to initialize persistence:', error);
+    // Don't exit, just continue without persistence
+    console.log('Continuing without persistence...');
+  }
+})();
 
 const server: net.Server = net.createServer((connection: net.Socket) => {
   connection.on("data", async (data) => {
@@ -33,8 +51,24 @@ server.listen(6379, "127.0.0.1", () => {
 });
 
 // Graceful shutdown
-const shutdown = () => {
+let isShuttingDown = false;
+
+const shutdown = async () => {
+  if (isShuttingDown) {
+    return; // Prevent multiple shutdown calls
+  }
+
+  isShuttingDown = true;
   console.log("Shutting down server...");
+
+  // Flush any pending writes
+  try {
+    await memServ.flushPersistence();
+    console.log("Persistence flushed");
+  } catch (error) {
+    console.error("Error flushing persistence:", error);
+  }
+
   server.close(() => {
     console.log("Server closed");
     process.exit(0);

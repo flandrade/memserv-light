@@ -13,9 +13,6 @@ export type Store = Map<string, CacheEntry>;
 
 export class Database {
   private store: Store = new Map();
-  private cachedSize: number = 0;
-  private sizeNeedsUpdate: boolean = true;
-  private lastCleanup: number = 0;
 
   private isExpired(entry: CacheEntry): boolean {
     return Boolean(entry.expiry && Date.now() > entry.expiry);
@@ -31,7 +28,6 @@ export class Database {
 
   set(key: string, value: unknown, ttl?: number): boolean {
     this.store.set(key, this.createEntry(value, ttl));
-    this.sizeNeedsUpdate = true;
     return true;
   }
 
@@ -41,7 +37,6 @@ export class Database {
 
     if (this.isExpired(entry)) {
       this.store.delete(key);
-      this.sizeNeedsUpdate = true;
       return null;
     }
 
@@ -50,7 +45,6 @@ export class Database {
 
   delete(key: string): boolean {
     const deleted = this.store.delete(key);
-    if (deleted) this.sizeNeedsUpdate = true;
     return deleted;
   }
 
@@ -60,7 +54,6 @@ export class Database {
 
     if (this.isExpired(entry)) {
       this.store.delete(key);
-      this.sizeNeedsUpdate = true;
       return false;
     }
 
@@ -69,18 +62,14 @@ export class Database {
 
   keys(pattern?: string): string[] {
     const validKeys: string[] = [];
-    let hasExpiredKeys = false;
 
     for (const [key, entry] of this.store.entries()) {
       if (this.isExpired(entry)) {
         this.store.delete(key);
-        hasExpiredKeys = true;
         continue;
       }
       validKeys.push(key);
     }
-
-    if (hasExpiredKeys) this.sizeNeedsUpdate = true;
 
     if (!pattern || pattern === '*') return validKeys;
 
@@ -90,30 +79,7 @@ export class Database {
 
   clear(): boolean {
     this.store.clear();
-    this.cachedSize = 0;
-    this.sizeNeedsUpdate = false;
     return true;
-  }
-
-  size(): number {
-    const now = Date.now();
-
-    // Only recalculate if needed and do cleanup max once every 1000ms
-    if (this.sizeNeedsUpdate || (now - this.lastCleanup > 1000)) {
-      let count = 0;
-      for (const [key, entry] of this.store.entries()) {
-        if (entry.expiry && now > entry.expiry) {
-          this.store.delete(key);
-        } else {
-          count++;
-        }
-      }
-      this.cachedSize = count;
-      this.sizeNeedsUpdate = false;
-      this.lastCleanup = now;
-    }
-
-    return this.cachedSize;
   }
 
   expire(key: string, seconds: number): boolean {
@@ -142,7 +108,6 @@ export class Database {
         cleaned++;
       }
     }
-    if (cleaned > 0) this.sizeNeedsUpdate = true;
     return cleaned;
   }
 }

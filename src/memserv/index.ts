@@ -1,11 +1,40 @@
 import { Command, type AnyCommandStructure } from "./types";
-import { serialize, deserialize, formatError, COMMON_RESP_VALUES } from "../serializer/serializer";
+import { serialize, deserialize, formatError, COMMON_RESP_VALUES, type RespValue } from "../serializer/serializer";
 import { Database } from "../store/database";
+import { AppendOnlyPersister, restoreFromFile } from "../store/persistence";
+import type { PersistenceOptions } from "../store/persistence";
 
 export class MemServLight {
   private db = new Database();
   private lastInfoUpdate = 0;
   private cachedInfoResponse = '';
+  private persister?: AppendOnlyPersister;
+
+  enablePersistence(filename: string, options?: PersistenceOptions): boolean {
+    try {
+      this.persister = new AppendOnlyPersister(filename, options);
+      return true;
+    } catch (error) {
+      console.error('Failed to enable persistence:', error);
+      return false;
+    }
+  }
+
+  async restoreFromPersistence(filename: string): Promise<boolean> {
+    return await restoreFromFile(filename, this);
+  }
+
+  async flushPersistence(): Promise<void> {
+    if (this.persister) {
+      await this.persister.flush();
+    }
+  }
+
+  private logCommand(command: RespValue[]): void {
+    if (this.persister) {
+      this.persister.logCommand(command);
+    }
+  }
 
   async execute({ command, params }: AnyCommandStructure): Promise<string> {
     switch (command) {
@@ -13,15 +42,30 @@ export class MemServLight {
         return COMMON_RESP_VALUES.PONG;
       case Command.Echo:
         return serialize(params.text);
-      case Command.Set:
+      case Command.Set: {
         this.db.set(params.key, params.value, params.ttl);
+
+        // Log command for persistence
+        const logCommand = ['SET', params.key, params.value];
+        if (params.ttl) {
+          logCommand.push('EX', params.ttl.toString());
+        }
+        this.logCommand(logCommand);
+
         return COMMON_RESP_VALUES.OK;
+      }
       case Command.Get: {
         const value = this.db.get(params.key) as string | null;
         return value ? serialize(value) : COMMON_RESP_VALUES.NULL;
       }
       case Command.Del: {
         const deleted = this.db.delete(params.key);
+
+        // Log command for persistence (only if key was actually deleted)
+        if (deleted) {
+          this.logCommand(['DEL', params.key]);
+        }
+
         return deleted ? COMMON_RESP_VALUES.ONE : COMMON_RESP_VALUES.ZERO;
       }
       case Command.Exists: {
@@ -34,10 +78,20 @@ export class MemServLight {
       }
       case Command.Clear: {
         this.db.clear();
+
+        // Log command for persistence
+        this.logCommand(['CLEAR']);
+
         return COMMON_RESP_VALUES.OK;
       }
       case Command.Expire: {
         const expired = this.db.expire(params.key, params.seconds);
+
+        // Log command for persistence (only if expiry was actually set)
+        if (expired) {
+          this.logCommand(['EXPIRE', params.key, params.seconds.toString()]);
+        }
+
         return expired ? COMMON_RESP_VALUES.ONE : COMMON_RESP_VALUES.ZERO;
       }
       case Command.Ttl: {
@@ -118,13 +172,11 @@ export class MemServLight {
 
   private info(): string {
     const now = Date.now();
-    if (now - this.lastInfoUpdate > 500) {
+    if (now - this.lastInfoUpdate > 1000) { // Update every 1s instead of 500ms
       const uptime = Math.floor(process.uptime());
-      const memUsed = Math.round(process.memoryUsage().heapUsed);
-      const memHuman = Math.round(memUsed / 1048576);
-      const keyCount = this.db.size();
+      const memMB = Math.round(process.memoryUsage().heapUsed / 1048576);
 
-      const infoString = `# Server\r\nredis_version:memserv-light-1.0.0\r\nredis_mode:standalone\r\ntcp_port:6379\r\nuptime_in_seconds:${uptime}\r\n\r\n# Memory\r\nused_memory:${memUsed}\r\nused_memory_human:${memHuman}M\r\n\r\n# Stats\r\ntotal_connections_received:0\r\ntotal_commands_processed:0\r\n\r\n# Keyspace\r\ndb0:keys=${keyCount},expires=0,avg_ttl=0`;
+      const infoString = `memserv-light v1.0.0\r\nuptime: ${uptime}s\r\nmemory: ${memMB}MB`;
 
       this.cachedInfoResponse = serialize(infoString);
       this.lastInfoUpdate = now;

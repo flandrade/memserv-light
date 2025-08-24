@@ -61,24 +61,6 @@ describe('Database Thread Safety', () => {
     });
   });
 
-  test('should handle size calculations safely', () => {
-    const db = new Database();
-
-    // Perform set operations and size checks
-    const sizes: number[] = [];
-    for (let i = 0; i < 5; i++) {
-      db.set(`key-${i}`, `value-${i}`);
-      sizes.push(db.size());
-    }
-
-    // Size should increase monotonically
-    for (let i = 0; i < sizes.length; i++) {
-      assert.strictEqual(sizes[i], i + 1, `Size should be ${i + 1} after ${i + 1} insertions`);
-    }
-
-    // Final size should be 5
-    assert.strictEqual(db.size(), 5);
-  });
 
   test('should handle expire operations safely', () => {
     const db = new Database();
@@ -199,7 +181,6 @@ describe('Database Thread Safety', () => {
 
     // Cleanup should remove 1 key
     assert.strictEqual(db.cleanupExpired(), 1);
-    assert.strictEqual(db.size(), 2);
   });
 
   test('should handle clear operation', () => {
@@ -208,11 +189,9 @@ describe('Database Thread Safety', () => {
     // Add some data
     db.set('key1', 'value1');
     db.set('key2', 'value2');
-    assert.strictEqual(db.size(), 2);
 
     // Clear should remove everything
     assert.strictEqual(db.clear(), true);
-    assert.strictEqual(db.size(), 0);
     assert.strictEqual(db.exists('key1'), false);
     assert.strictEqual(db.exists('key2'), false);
   });
