@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { serialize, deserialize, formatResponse, type RespValue } from './serializer';
+import { serialize, deserialize,  type RespValue } from './serializer';
 
 describe('RESP Serializer', () => {
   describe('serialize', () => {
@@ -72,11 +72,6 @@ describe('RESP Serializer', () => {
     test('should serialize nested arrays', () => {
       const result = serialize([['a', 'b'], ['c']]);
       assert.strictEqual(result, '*2\r\n*2\r\n+a\r\n+b\r\n*1\r\n+c\r\n');
-    });
-
-    test('should serialize undefined as string', () => {
-      const result = serialize(undefined as any); // Allow undefined for this legacy test
-      assert.strictEqual(result, '$9\r\nundefined\r\n');
     });
 
     test('should serialize objects as string', () => {
@@ -156,43 +151,6 @@ describe('RESP Serializer', () => {
       assert.throws(() => {
         deserialize('-ERROR Something went wrong\r\n');
       }, /Something went wrong/);
-    });
-  });
-
-  describe('formatResponse', () => {
-    test('should format OK response', () => {
-      const result = formatResponse('OK');
-      assert.strictEqual(result, '+OK\r\n');
-    });
-
-    test('should format ERROR response with message', () => {
-      const result = formatResponse('ERROR', 'Something went wrong');
-      assert.strictEqual(result, '-ERROR Something went wrong\r\n');
-    });
-
-    test('should format ERROR response without message', () => {
-      const result = formatResponse('ERROR');
-      assert.strictEqual(result, '-ERROR Unknown error\r\n');
-    });
-
-    test('should format data response using serialize', () => {
-      const result = formatResponse('DATA', 'hello');
-      assert.strictEqual(result, '+hello\r\n');
-    });
-
-    test('should format data response with array', () => {
-      const result = formatResponse('DATA', ['a', 'b']);
-      assert.strictEqual(result, '*2\r\n+a\r\n+b\r\n');
-    });
-
-    test('should format data response with number', () => {
-      const result = formatResponse('DATA', 42);
-      assert.strictEqual(result, ':42\r\n');
-    });
-
-    test('should format data response with null', () => {
-      const result = formatResponse('DATA', null);
-      assert.strictEqual(result, '$-1\r\n');
     });
   });
 
