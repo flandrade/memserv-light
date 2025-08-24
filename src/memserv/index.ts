@@ -55,42 +55,61 @@ export class MemServLight {
     const parsed = deserialize(request);
     if (!Array.isArray(parsed) || !parsed.length) return null;
 
-    const [cmd, ...args] = parsed.map(String);
-    const command = cmd.toLowerCase();
+    const cmd = String(parsed[0]).toLowerCase();
 
-    switch (command) {
-      case Command.Ping: return { command: Command.Ping, params: {} };
-      case Command.Echo: return { command: Command.Echo, params: { text: args.join(' ') } };
-      case Command.Clear: return { command: Command.Clear, params: {} };
-      case Command.Info: return { command: Command.Info, params: { section: args[0] } };
-      case Command.Keys: return { command: Command.Keys, params: { pattern: args[0] || '*' } };
+    // Commands that don't need arguments
+    switch (cmd) {
+      case 'ping': return { command: Command.Ping, params: {} };
+      case 'clear': return { command: Command.Clear, params: {} };
+      case 'info': return { command: Command.Info, params: { section: parsed[1] ? String(parsed[1]) : undefined } };
+      case 'keys': return { command: Command.Keys, params: { pattern: parsed[1] ? String(parsed[1]) : '*' } };
+      case 'echo': {
+        const args: string[] = [];
+        for (let i = 1; i < parsed.length; i++) {
+          args.push(String(parsed[i]));
+        }
+        return { command: Command.Echo, params: { text: args.join(' ') } };
+      }
     }
 
-    if (!args.length) return null;
+    // Commands that need at least one argument
+    if (parsed.length < 2) return null;
+    const arg0 = String(parsed[1]);
 
-    switch (command) {
-      case Command.Get: return { command: Command.Get, params: { key: args[0] } };
-      case Command.Del: return { command: Command.Del, params: { key: args[0] } };
-      case Command.Exists: return { command: Command.Exists, params: { key: args[0] } };
-      case Command.Ttl: return { command: Command.Ttl, params: { key: args[0] } };
-      case Command.Set: {
-        const key = args[0];
-        let value = args.slice(1).join(' ');
+    switch (cmd) {
+      case 'get': return { command: Command.Get, params: { key: arg0 } };
+      case 'del': return { command: Command.Del, params: { key: arg0 } };
+      case 'exists': return { command: Command.Exists, params: { key: arg0 } };
+      case 'ttl': return { command: Command.Ttl, params: { key: arg0 } };
+      case 'set': {
+        if (parsed.length < 3) return null;
+
+        const key = arg0;
         let ttl: number | undefined;
+        let valueEndIndex = parsed.length;
 
-        // Parse TTL
-        if (args.length >= 4 && args[args.length - 2] === 'EX') {
-          const t = parseInt(args[args.length - 1], 10);
+        // Check for TTL - check last elements first
+        if (parsed.length >= 4 && String(parsed[parsed.length - 2]) === 'EX') {
+          const t = parseInt(String(parsed[parsed.length - 1]), 10);
           if (!Number.isNaN(t)) {
             ttl = t;
-            value = args.slice(1, -2).join(' ');
+            valueEndIndex = parsed.length - 2;
           }
         }
+
+        // Build value string only once
+        const valueParts: string[] = [];
+        for (let i = 2; i < valueEndIndex; i++) {
+          valueParts.push(String(parsed[i]));
+        }
+        const value = valueParts.join(' ');
+
         return { command: Command.Set, params: { key, value, ttl } };
       }
-      case Command.Expire: {
-        const seconds = parseInt(args[1], 10);
-        return Number.isNaN(seconds) ? null : { command: Command.Expire, params: { key: args[0], seconds } };
+      case 'expire': {
+        if (parsed.length < 3) return null;
+        const seconds = parseInt(String(parsed[2]), 10);
+        return Number.isNaN(seconds) ? null : { command: Command.Expire, params: { key: arg0, seconds } };
       }
     }
 
@@ -113,5 +132,6 @@ export class MemServLight {
     return this.cachedInfoResponse;
   }
 }
+
 
 
