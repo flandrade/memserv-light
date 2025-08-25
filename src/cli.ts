@@ -5,13 +5,31 @@ import { program } from 'commander';
 import { MemServLight } from './memserv';
 import { deserialize } from './serializer/serializer';
 
-// Create a local MemServLight instance for the CLI
-const memServLight = new MemServLight();
+let memServLight: MemServLight;
 
-
+/**
+ * Executes a command and prints the response.
+ *
+ * @param command - The command to execute.
+ * @returns A promise that resolves when the command is executed.
+ */
 const executeCommand = async (command: string): Promise<void> => {
   try {
-    const parsedCommand = memServLight.parse(command);
+    // Convert command string to RESP format for parsing
+    const parts = command.split(' ');
+    const respCommand = parts.map(part => {
+      // Remove quotes if present
+      if ((part.startsWith('"') && part.endsWith('"')) ||
+          (part.startsWith("'") && part.endsWith("'"))) {
+        return part.slice(1, -1);
+      }
+      return part;
+    });
+
+    // Create RESP array format
+    const respArray = `*${respCommand.length}\r\n${respCommand.map(part => `$${part.length}\r\n${part}\r\n`).join('')}`;
+
+    const parsedCommand = memServLight.parse(respArray);
 
     if (!parsedCommand) {
       console.log('(error) Invalid command');
@@ -32,6 +50,11 @@ const executeCommand = async (command: string): Promise<void> => {
   }
 };
 
+/**
+ * Starts the interactive CLI.
+ *
+ * @returns A promise that resolves when the CLI is started.
+ */
 const startInteractive = (): void => {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -70,7 +93,14 @@ const startInteractive = (): void => {
   });
 };
 
+/**
+ * Main function for the CLI.
+ *
+ * @returns A promise that resolves when the CLI is started.
+ */
 const main = (): void => {
+  memServLight = new MemServLight();
+
   program
     .name('memserv-cli')
     .description('Local CLI for memserv-light')

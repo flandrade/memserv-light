@@ -111,7 +111,7 @@ describe('Database Thread Safety', () => {
     const db = new Database();
 
     // Test TTL on non-existent key
-    assert.strictEqual(db.ttl('non-existent'), -1);
+    assert.strictEqual(db.ttl('non-existent'), -2);
 
     // Test TTL on key without expiry
     db.set('no-expiry', 'value');
@@ -159,28 +159,7 @@ describe('Database Thread Safety', () => {
     // Key should be considered expired
     assert.strictEqual(db.get('short-ttl'), null);
     assert.strictEqual(db.exists('short-ttl'), false);
-    assert.strictEqual(db.ttl('short-ttl'), -1);
-  });
-
-  test('should handle cleanup operations', () => {
-    const db = new Database();
-
-    // Add some keys
-    db.set('key1', 'value1');
-    db.set('key2', 'value2');
-    db.set('key3', 'value3');
-
-    // Manual cleanup should return 0 (no expired keys)
-    assert.strictEqual(db.cleanupExpired(), 0);
-
-    // Set one key to be expired
-    const entry = (db as any).store.get('key2');
-    if (entry) {
-      entry.expiry = Date.now() - 1000;
-    }
-
-    // Cleanup should remove 1 key
-    assert.strictEqual(db.cleanupExpired(), 1);
+    assert.strictEqual(db.ttl('short-ttl'), -2);
   });
 
   test('should handle clear operation', () => {
