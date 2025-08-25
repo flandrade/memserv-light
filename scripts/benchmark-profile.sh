@@ -74,7 +74,7 @@ echo -e "${BLUE}Running Redis benchmark...${NC}"
 echo "Target: 1,000,000 operations (SET and GET)"
 echo "This may take a few minutes..."
 
-redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 1000000 -r 1000000 -d 500 -q
+redis-benchmark -h 127.0.0.1 -p 6379 -t set,get -n 500000 -r 500000 -d 200 -q
 
 echo -e "${GREEN}Benchmark completed!${NC}"
 

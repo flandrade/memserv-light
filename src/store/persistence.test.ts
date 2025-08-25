@@ -2,11 +2,13 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import * as fs from 'fs';
 import * as path from 'path';
-import { AppendOnlyPersister, restoreFromFile, type PersistenceOptions } from './persistence';
+import { AppendOnlyPersister, restoreFromFile } from './persistence';
 import { serialize, deserialize, type RespValue } from '../serializer/serializer';
 
 // Mock MemServ interface for testing
 class MockMemServ {
+  private isRestoring = false;
+
   parse(request: string): unknown {
     try {
       return deserialize(request);
@@ -20,6 +22,10 @@ class MockMemServ {
       return `+OK ${command[0]}`;
     }
     return '+OK';
+  }
+
+  setRestorationMode(enabled: boolean): void {
+    this.isRestoring = enabled;
   }
 }
 
@@ -396,6 +402,9 @@ describe('restoreFromFile', () => {
       parse: (request: string) => deserialize(request),
       execute: () => {
         throw new Error('Execute error');
+      },
+      setRestorationMode: (enabled: boolean) => {
+        // No-op for this mock
       }
     };
 

@@ -4,12 +4,27 @@ import { Database } from "../store/database";
 import { AppendOnlyPersister, restoreFromFile } from "../store/persistence";
 import type { PersistenceOptions } from "../store/persistence";
 
+/**
+ * MemServLight class for MemServLight server.
+ *
+ * This class provides a simple in-memory database for the server.
+ * It uses a Database class to store the data and a AppendOnlyPersister class to persist the data.
+ *
+ */
 export class MemServLight {
   private db = new Database();
   private lastInfoUpdate = 0;
   private cachedInfoResponse = '';
   private persister?: AppendOnlyPersister;
+  private isRestoring = false;
 
+  /**
+   * Enables persistence for the server.
+   *
+   * @param filename - The filename to persist the data to.
+   * @param options - The options for the persistence.
+   * @returns True if persistence is enabled, false otherwise.
+   */
   enablePersistence(filename: string, options?: PersistenceOptions): boolean {
     try {
       this.persister = new AppendOnlyPersister(filename, options);
@@ -20,22 +35,77 @@ export class MemServLight {
     }
   }
 
+  /**
+   * Restores the data from the persistence file.
+   *
+   * @param filename - The filename to restore the data from.
+   * @returns True if the data is restored, false otherwise.
+   */
   async restoreFromPersistence(filename: string): Promise<boolean> {
     return await restoreFromFile(filename, this);
   }
 
+  /**
+   * Flushes the persistence file.
+   *
+   * @returns A promise that resolves when the persistence file is flushed.
+   */
   async flushPersistence(): Promise<void> {
     if (this.persister) {
       await this.persister.flush();
     }
   }
 
-  private logCommand(command: RespValue[]): void {
-    if (this.persister) {
+  /**
+   * Logs a command to the persistence file.
+   *
+   * @param command - The command to log.
+   * @param skipDuringRestore - If true, skip logging during restoration to prevent duplicate entries
+   */
+  private logCommand(command: RespValue[], skipDuringRestore = false): void {
+    if (this.persister && !skipDuringRestore) {
       this.persister.logCommand(command);
     }
   }
 
+  /**
+   * Sets the restoration mode flag to prevent logging during AOF restoration
+   */
+  setRestorationMode(enabled: boolean): void {
+    this.isRestoring = enabled;
+  }
+
+  /**
+   * Executes a parsed command and returns the RESP-formatted response.
+   *
+   * This method handles the supported Redis-compatible commands including:
+   * - **Basic Operations**: SET, GET, DEL, EXISTS
+   * - **Key Management**: KEYS, CLEAR, EXPIRE, TTL
+   * - **Server Commands**: PING, ECHO, INFO
+   *
+   * Each command is executed against the in-memory database and optionally
+   * logged to the AOF persistence file for durability. The method ensures
+   * atomic operations and proper error handling.
+   *
+   * @param command - The command structure containing the command type and parameters
+   * @returns Promise resolving to RESP-formatted string response
+   *
+   * @example
+   * // Execute a SET command
+   * const result = await memServ.execute({
+   *   command: Command.Set,
+   *   params: { key: 'user:1', value: 'John Doe', ttl: 3600 }
+   * });
+   * // Returns: "+OK\r\n"
+   *
+   * @example
+   * // Execute a GET command
+   * const result = await memServ.execute({
+   *   command: Command.Get,
+   *   params: { key: 'user:1' }
+   * });
+   * // Returns: "$8\r\nJohn Doe\r\n" or "$-1\r\n" if key doesn't exist
+   */
   async execute({ command, params }: AnyCommandStructure): Promise<string> {
     switch (command) {
       case Command.Ping:
@@ -50,7 +120,7 @@ export class MemServLight {
         if (params.ttl) {
           logCommand.push('EX', params.ttl.toString());
         }
-        this.logCommand(logCommand);
+        this.logCommand(logCommand, this.isRestoring);
 
         return COMMON_RESP_VALUES.OK;
       }
@@ -63,7 +133,7 @@ export class MemServLight {
 
         // Log command for persistence (only if key was actually deleted)
         if (deleted) {
-          this.logCommand(['DEL', params.key]);
+          this.logCommand(['DEL', params.key], this.isRestoring);
         }
 
         return deleted ? COMMON_RESP_VALUES.ONE : COMMON_RESP_VALUES.ZERO;
@@ -80,7 +150,7 @@ export class MemServLight {
         this.db.clear();
 
         // Log command for persistence
-        this.logCommand(['CLEAR']);
+        this.logCommand(['CLEAR'], this.isRestoring);
 
         return COMMON_RESP_VALUES.OK;
       }
@@ -89,7 +159,7 @@ export class MemServLight {
 
         // Log command for persistence (only if expiry was actually set)
         if (expired) {
-          this.logCommand(['EXPIRE', params.key, params.seconds.toString()]);
+          this.logCommand(['EXPIRE', params.key, params.seconds.toString()], this.isRestoring);
         }
 
         return expired ? COMMON_RESP_VALUES.ONE : COMMON_RESP_VALUES.ZERO;
@@ -105,6 +175,52 @@ export class MemServLight {
     }
   }
 
+  /**
+   * Parses a RESP-formatted request string into a structured command object.
+   *
+   * This method deserializes RESP protocol messages and converts them into
+   * strongly-typed command structures that can be safely executed. It handles
+   * various command formats and validates parameter requirements.
+   *
+   * **Supported Commands:**
+   * - `PING` - No parameters
+   * - `ECHO <text>` - Single text parameter
+   * - `SET <key> <value> [EX <seconds>]` - Key, value, optional TTL
+   * - `GET <key>` - Single key parameter
+   * - `DEL <key>` - Single key parameter
+   * - `EXISTS <key>` - Single key parameter
+   * - `KEYS [pattern]` - Optional pattern (defaults to '*')
+   * - `TTL <key>` - Single key parameter
+   * - `EXPIRE <key> <seconds>` - Key and TTL seconds
+   * - `CLEAR` - No parameters
+   * - `INFO [section]` - Optional section parameter
+   *
+   * **Parameter Validation:**
+   * - Commands requiring parameters return null if insufficient arguments
+   * - TTL values are validated as positive integers
+   * - Pattern matching supports wildcards (* and ?)
+   *
+   * @param request - RESP-formatted string (e.g., "*3\r\n$3\r\nSET\r\n$6\r\nuser:1\r\n$8\r\nJohn Doe\r\n")
+   * @returns Structured command object or null if parsing fails
+   *
+   * @example
+   * // Parse a SET command
+   * const cmd = memServ.parse("*3\r\n$3\r\nSET\r\n$6\r\nuser:1\r\n$8\r\nJohn Doe\r\n");
+   * // Returns: { command: Command.Set, params: { key: 'user:1', value: 'John Doe' } }
+   *
+   * @example
+   * // Parse a SET command with TTL
+   * const cmd = memServ.parse("*5\r\n$3\r\nSET\r\n$6\r\nuser:1\r\n$8\r\nJohn Doe\r\n$2\r\nEX\r\n$4\r\n3600\r\n");
+   * // Returns: { command: Command.Set, params: { key: 'user:1', value: 'John Doe', ttl: 3600 } }
+   *
+   * @example
+   * // Parse an invalid command
+   * const cmd = memServ.parse("*1\r\n$3\r\nINVALID\r\n");
+   * // Returns: null
+   *
+   * @see {@link execute} For executing the parsed command
+   * @see {@link deserialize} For RESP protocol deserialization
+   */
   parse(request: string): AnyCommandStructure | null {
     const parsed = deserialize(request);
     if (!Array.isArray(parsed) || !parsed.length) return null;
@@ -170,9 +286,14 @@ export class MemServLight {
     return null;
   }
 
+  /**
+   * Returns the info about the server.
+   *
+   * @returns The info about the server.
+   */
   private info(): string {
     const now = Date.now();
-    if (now - this.lastInfoUpdate > 1000) { // Update every 1s instead of 500ms
+    if (now - this.lastInfoUpdate > 1000) { // Update every 1s
       const uptime = Math.floor(process.uptime());
       const memMB = Math.round(process.memoryUsage().heapUsed / 1048576);
 

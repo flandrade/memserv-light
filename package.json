@@ -14,9 +14,7 @@
     "dev": "ts-node src/server.ts",
     "dev:cli": "ts-node src/cli.ts",
     "test": "tsx --test src/serializer/serializer.test.ts src/store/asyncLock.test.ts src/store/database.test.ts src/store/persistence.test.ts",
-    "benchmark": "./scripts/benchmark-profile.sh",
-    "benchmark:quick": "./scripts/quick-benchmark.sh",
-    "profile": "./scripts/profile-only.sh"
+    "demo": "tsx scripts/demo-simulation.ts"
   },
   "dependencies": {
     "commander": "^11.1.0",
